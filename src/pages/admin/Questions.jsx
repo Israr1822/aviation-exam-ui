@@ -373,11 +373,11 @@ export default function Questions() {
                           question?.unit || ""
                         }`}</strong>
                       </p>
-                      {(question.plusT || question.minusT) && (
+                      {(question.plusT !== 0 && question.plusT) || (question.minusT !== 0 && question.minusT) ? (
                         <p className="text-sm text-gray-600 mt-1">
                           Tolerance: ±{question.plusT || question.minusT}
                         </p>
-                      )}
+                      ) : null}
                     </div>
                   )}
 
