@@ -32,6 +32,10 @@ export default function ExamDetails() {
   });
   const [editingAssignment, setEditingAssignment] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [assignmentError, setAssignmentError] = useState("");
+  const [useCustomSchedule, setUseCustomSchedule] = useState(false);
+  const [editAssignmentError, setEditAssignmentError] = useState("");
+  const [editUseCustomSchedule, setEditUseCustomSchedule] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: exam, isLoading: examLoading } = useQuery({
@@ -45,7 +49,7 @@ export default function ExamDetails() {
       usersAPI
         .getAll()
         .then((res) =>
-          (res.data.users || []).filter((user) => user.role === "student")
+          (res.data.users || []).filter((user) => user.role === "student"),
         ),
   });
 
@@ -62,7 +66,7 @@ export default function ExamDetails() {
   const unassignedStudents = useMemo(() => {
     if (!studentsData || !assignments) return studentsData || [];
     const assignedIds = new Set(
-      assignments.map((a) => a.studentId.id.toString())
+      assignments.map((a) => a.studentId.id.toString()),
     );
     return studentsData.filter((s) => !assignedIds.has(s.id.toString()));
   }, [studentsData, assignments]);
@@ -86,6 +90,8 @@ export default function ExamDetails() {
       queryClient.invalidateQueries({ queryKey: ["assignments"] });
       setShowAssignModal(false);
       setSelectedStudents([]);
+      setAssignmentError("");
+      setUseCustomSchedule(false);
       setAssignmentSettings({
         allowedAttempts: "",
         opensAt: "",
@@ -101,6 +107,7 @@ export default function ExamDetails() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["assignments"] });
       setEditingAssignment(null);
+      setEditAssignmentError("");
     },
   });
 
@@ -113,18 +120,74 @@ export default function ExamDetails() {
   const handleBulkAssign = () => {
     if (selectedStudents.length === 0) return;
 
+    // Helper function to check if datetime value is complete (has both date and time)
+    // datetime-local format: YYYY-MM-DDTHH:MM
+    const isCompleteDatetime = (value) => {
+      if (!value || !value.trim()) return false;
+      // Check if the value matches the complete datetime-local format
+      const datetimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+      return datetimeRegex.test(value.trim());
+    };
+
+    // Validate custom date fields
+    // Validate custom date fields only if custom schedule is enabled
+    if (useCustomSchedule) {
+      const opensAtValue = assignmentSettings.opensAt?.trim();
+      const closesAtValue = assignmentSettings.closesAt?.trim();
+      const hasOpensAt = !!opensAtValue;
+      const hasClosesAt = !!closesAtValue;
+
+      // Ensure both fields are provided
+      if (!hasOpensAt || !hasClosesAt) {
+        setAssignmentError(
+          "You enabled custom schedule. Please provide BOTH 'Opens At' and 'Closes At' dates.",
+        );
+        return;
+      }
+
+      // If dates are provided, validate they have complete datetime (date + time)
+      if (hasOpensAt && !isCompleteDatetime(opensAtValue)) {
+        setAssignmentError(
+          "Please select both date AND time for 'Opens At'. The time field is required.",
+        );
+        return;
+      }
+
+      if (hasClosesAt && !isCompleteDatetime(closesAtValue)) {
+        setAssignmentError(
+          "Please select both date AND time for 'Closes At'. The time field is required.",
+        );
+        return;
+      }
+
+      // Validate chronological order
+      if (hasOpensAt && hasClosesAt) {
+        const opensDate = new Date(opensAtValue);
+        const closesDate = new Date(closesAtValue);
+        if (closesDate <= opensDate) {
+          setAssignmentError("'Closes At' must be after 'Opens At'.");
+          return;
+        }
+      }
+    }
+
+    // Clear any previous errors
+    setAssignmentError("");
+
     const payload = {
       examId: id,
       studentIds: selectedStudents,
       allowedAttempts: assignmentSettings.allowedAttempts
         ? Number(assignmentSettings.allowedAttempts)
         : undefined,
-      opensAt: assignmentSettings.opensAt
-        ? new Date(assignmentSettings.opensAt).toISOString()
-        : undefined,
-      closesAt: assignmentSettings.closesAt
-        ? new Date(assignmentSettings.closesAt).toISOString()
-        : undefined,
+      opensAt:
+        useCustomSchedule && assignmentSettings.opensAt
+          ? new Date(assignmentSettings.opensAt).toISOString()
+          : undefined,
+      closesAt:
+        useCustomSchedule && assignmentSettings.closesAt
+          ? new Date(assignmentSettings.closesAt).toISOString()
+          : undefined,
       isReviewAllowed: assignmentSettings.isReviewAllowed,
     };
 
@@ -132,6 +195,7 @@ export default function ExamDetails() {
   };
 
   const openEditModal = (assignment) => {
+    setEditUseCustomSchedule(!!(assignment.opensAt || assignment.closesAt));
     setEditingAssignment({
       ...assignment,
       opensAt: assignment.opensAt
@@ -147,16 +211,71 @@ export default function ExamDetails() {
     e.preventDefault();
     if (!editingAssignment) return;
 
+    // Helper function to check if datetime value is complete (has both date and time)
+    // datetime-local format: YYYY-MM-DDTHH:MM
+    const isCompleteDatetime = (value) => {
+      if (!value || !value.trim()) return false;
+      // Check if the value matches the complete datetime-local format
+      const datetimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+      return datetimeRegex.test(value.trim());
+    };
+
+    // Validate custom date fields only if custom schedule is enabled
+    if (editUseCustomSchedule) {
+      const opensAtValue = editingAssignment.opensAt?.trim();
+      const closesAtValue = editingAssignment.closesAt?.trim();
+      const hasOpensAt = !!opensAtValue;
+      const hasClosesAt = !!closesAtValue;
+
+      // Ensure both fields are provided
+      if (!hasOpensAt || !hasClosesAt) {
+        setEditAssignmentError(
+          "You enabled custom schedule. Please provide BOTH 'Opens At' and 'Closes At' dates.",
+        );
+        return;
+      }
+
+      // If dates are provided, validate they have complete datetime (date + time)
+      if (hasOpensAt && !isCompleteDatetime(opensAtValue)) {
+        setEditAssignmentError(
+          "Please select both date AND time for 'Opens At'. The time field is required.",
+        );
+        return;
+      }
+
+      if (hasClosesAt && !isCompleteDatetime(closesAtValue)) {
+        setEditAssignmentError(
+          "Please select both date AND time for 'Closes At'. The time field is required.",
+        );
+        return;
+      }
+
+      // Validate chronological order
+      if (hasOpensAt && hasClosesAt) {
+        const opensDate = new Date(opensAtValue);
+        const closesDate = new Date(closesAtValue);
+        if (closesDate <= opensDate) {
+          setEditAssignmentError("'Closes At' must be after 'Opens At'.");
+          return;
+        }
+      }
+    }
+
+    // Clear any previous errors
+    setEditAssignmentError("");
+
     const data = {
       allowedAttempts: editingAssignment.allowedAttempts
         ? Number(editingAssignment.allowedAttempts)
         : undefined,
-      opensAt: editingAssignment.opensAt
-        ? new Date(editingAssignment.opensAt).toISOString()
-        : undefined,
-      closesAt: editingAssignment.closesAt
-        ? new Date(editingAssignment.closesAt).toISOString()
-        : undefined,
+      opensAt:
+        editUseCustomSchedule && editingAssignment.opensAt
+          ? new Date(editingAssignment.opensAt).toISOString()
+          : undefined,
+      closesAt:
+        editUseCustomSchedule && editingAssignment.closesAt
+          ? new Date(editingAssignment.closesAt).toISOString()
+          : undefined,
       isReviewAllowed: editingAssignment.isReviewAllowed,
     };
 
@@ -443,7 +562,7 @@ export default function ExamDetails() {
                           onClick={() => {
                             if (
                               window.confirm(
-                                "Remove this student's assignment?"
+                                "Remove this student's assignment?",
                               )
                             ) {
                               deleteAssignmentMutation.mutate(assignment.id);
@@ -528,41 +647,83 @@ export default function ExamDetails() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="mb-4">
+                <label className="flex items-center gap-3 cursor-pointer p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={useCustomSchedule}
+                    onChange={(e) => {
+                      setUseCustomSchedule(e.target.checked);
+                      setAssignmentError("");
+                    }}
+                    className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                  />
+                  <div>
+                    <span className="block font-semibold text-gray-800">
+                      Set Custom Schedule
+                    </span>
+                    <span className="block text-sm text-gray-500">
+                      Override exam default opening/closing times
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              <div
+                className={`grid grid-cols-1 md:grid-cols-2 gap-4 transition-opacity duration-300 ${
+                  useCustomSchedule ? "opacity-100" : "opacity-50 grayscale"
+                }`}
+              >
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Custom Opens At (optional)
+                    Custom Opens At
+                    {useCustomSchedule && (
+                      <span className="text-red-500 ml-1">*</span>
+                    )}
                   </label>
                   <input
                     type="datetime-local"
                     value={assignmentSettings.opensAt}
+                    disabled={!useCustomSchedule}
                     onChange={(e) =>
                       setAssignmentSettings((prev) => ({
                         ...prev,
                         opensAt: e.target.value,
                       }))
                     }
-                    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all outline-none disabled:cursor-not-allowed disabled:bg-gray-100"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Custom Closes At (optional)
+                    Custom Closes At
+                    {useCustomSchedule && (
+                      <span className="text-red-500 ml-1">*</span>
+                    )}
                   </label>
                   <input
                     type="datetime-local"
                     value={assignmentSettings.closesAt}
                     min={assignmentSettings.opensAt}
+                    disabled={!useCustomSchedule}
                     onChange={(e) =>
                       setAssignmentSettings((prev) => ({
                         ...prev,
                         closesAt: e.target.value,
                       }))
                     }
-                    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all outline-none disabled:cursor-not-allowed disabled:bg-gray-100"
                   />
                 </div>
               </div>
+
+              {/* Validation Error Message */}
+              {assignmentError && (
+                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-2">
+                  <XCircle size={18} className="flex-shrink-0 mt-0.5" />
+                  <span>{assignmentError}</span>
+                </div>
+              )}
 
               <div className="flex justify-end gap-4 mt-8">
                 <button
@@ -637,46 +798,86 @@ export default function ExamDetails() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="mb-4">
+                <label className="flex items-center gap-3 cursor-pointer p-3 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={editUseCustomSchedule}
+                    onChange={(e) => {
+                      setEditUseCustomSchedule(e.target.checked);
+                      setEditAssignmentError("");
+                    }}
+                    className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+                  />
+                  <span className="font-semibold text-gray-800">
+                    Use Custom Schedule
+                  </span>
+                </label>
+              </div>
+
+              <div
+                className={`grid grid-cols-2 gap-4 transition-opacity duration-300 ${
+                  editUseCustomSchedule ? "opacity-100" : "opacity-50 grayscale"
+                }`}
+              >
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Opens At
+                    {editUseCustomSchedule && (
+                      <span className="text-red-500 ml-1">*</span>
+                    )}
                   </label>
                   <input
                     type="datetime-local"
                     value={editingAssignment.opensAt}
+                    disabled={!editUseCustomSchedule}
                     onChange={(e) =>
                       setEditingAssignment((prev) => ({
                         ...prev,
                         opensAt: e.target.value,
                       }))
                     }
-                    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all outline-none disabled:cursor-not-allowed disabled:bg-gray-100"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">
                     Closes At
+                    {editUseCustomSchedule && (
+                      <span className="text-red-500 ml-1">*</span>
+                    )}
                   </label>
                   <input
                     type="datetime-local"
                     value={editingAssignment.closesAt}
                     min={editingAssignment.opensAt}
+                    disabled={!editUseCustomSchedule}
                     onChange={(e) =>
                       setEditingAssignment((prev) => ({
                         ...prev,
                         closesAt: e.target.value,
                       }))
                     }
-                    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all outline-none"
+                    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 transition-all outline-none disabled:cursor-not-allowed disabled:bg-gray-100"
                   />
                 </div>
               </div>
 
+              {/* Validation Error Message */}
+              {editAssignmentError && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-2">
+                  <XCircle size={18} className="flex-shrink-0 mt-0.5" />
+                  <span>{editAssignmentError}</span>
+                </div>
+              )}
+
               <div className="flex justify-end gap-4 pt-4">
                 <button
                   type="button"
-                  onClick={() => setEditingAssignment(null)}
+                  onClick={() => {
+                    setEditingAssignment(null);
+                    setEditAssignmentError("");
+                  }}
                   className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-xl transition"
                 >
                   Cancel
